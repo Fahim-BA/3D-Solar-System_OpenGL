@@ -6,6 +6,50 @@ import time
 import math
 import random
 
+scene_mode = 0
+
+# Add these new variables under the "Rocket state" section
+repair_mode = False
+broken_parts = []  # Stores positions of broken components
+REPAIR_TIME = 15  # Seconds
+repair_timer = 0
+repair_progress = 0
+REPAIR_ITEMS_NEEDED = 3
+MAX_REPAIR_ITEMS = 3  # Maximum simultaneous repair items
+REPAIR_SPAWN_INTERVAL = 2.0
+last_repair_spawn = 0  # Time of last repair item spawn
+
+# Add to the constants section
+REPAIR_ITEM_RADIUS = 10.0
+REPAIR_ITEM_COLOR = [0.0, 1.0, 0.0]  # Green
+REPAIR_HUD_COLOR = [0.2, 0.8, 0.2]  # Green
+
+mission_start_time = None  # Time when the mission starts
+mission_complete = False  # Flag to indicate mission completion
+
+mission_planet_pos = None  # Position of the mission planet
+MISSION_PLANET_RADIUS = 50.0  # Radius of the mission planet
+MISSION_PLANET_DISTANCE = 2000.0  # Distance in front of the rocket
+
+meteors = []  # List to store meteor positions
+MAX_METEORS = 80  # Maximum number of meteors
+METEOR_SPAWN_DISTANCE = 2000  # Distance ahead of the rocket to spawn meteors
+METEOR_RADIUS = 25.0  # Radius of meteors
+rocket_health = 10  # Rocket's health points
+game_over = False  # Game over state
+
+stars_mode_1 = []  # List to store stars for scene mode 1
+MAX_STARS = 60  # Maximum number of stars in front of the rocket
+STAR_SPAWN_DISTANCE = 200  # Distance in front of the rocket to spawn stars
+STAR_DESPAWN_DISTANCE = 10  # Distance behind the rocket to despawn stars
+
+# Rocket state
+rocket_pos = [0.0, 20.0, 175.0]  # Initial position (x, y, z)
+rocket_velocity = [0.0, 0.0, 0.0]  # Velocity (x, y, z)
+rocket_speed = 1  # Speed of the rocket
+movement = 0.5
+rocket_movement = {"w": True, "s": False, "a": False, "d": False, "q": False, "e": False}  # Movement state
+
 # --- Constants ---
 WINDOW_WIDTH = 1000
 WINDOW_HEIGHT = 800
@@ -173,8 +217,21 @@ SUN_GLOW_COLORS = [
 
 # --- Camera ---
 # Initial camera position slightly above Earth's orbit plane, looking at the Sun
-camera_pos = [0.0, 40.0, EARTH_ORBIT_RADIUS + 60.0] # Start slightly further back
-camera_target = [0.0, 0.0, 0.0] # Look at the origin (Sun)
+# if scene_mode == 0:
+#   camera_pos = [0.0, 40.0, EARTH_ORBIT_RADIUS + 60.0] # Start slightly further back
+#   camera_target = [0.0, 0.0, 0.0] # Look at the origin (Sun)
+# elif scene_mode == 1:
+#   camera_pos = [rocket_pos[0], rocket_pos[1] + 20.0, rocket_pos[2] + 50.0]  # Start above and behind the rocket
+#   camera_target = rocket_pos[:]  # Look at the rocket
+
+# Camera for scene mode 0 (solar system)
+camera_pos = [0.0, 40.0, EARTH_ORBIT_RADIUS + 60.0]
+camera_target = [0.0, 0.0, 0.0]
+
+# Camera for scene mode 1 (rocket mode)
+camera_pos_mode_1 = [rocket_pos[0], rocket_pos[1] + 20 , rocket_pos[2] + 70]  # Start above and behind the rocket
+camera_target_mode_1 = rocket_pos[:]
+
 camera_up = [0.0, 1.0, 0.0] # Y is up
 CAMERA_MOVE_SPEED = 10.0
 CAMERA_ZOOM_SPEED = 10.0
@@ -205,6 +262,75 @@ earth_rotation_angle = 0.0  # Separate from orbit angle
 EARTH_ROTATION_SPEED = 0.5  # Slower default rotation (degrees per frame)
 
 # --- Initialization Functions ---
+
+def generate_stars_mode_1():
+    """Generates stars in front of the rocket."""
+    global stars_mode_1
+
+    while len(stars_mode_1) < MAX_STARS:
+        # Generate random positions in front of the rocket
+        x = rocket_pos[0] + random.uniform(-100, 100)  # Random x offset
+        y = rocket_pos[1] + random.uniform(-100, 100)  # Random y offset
+        z = rocket_pos[2] - random.uniform(0, STAR_SPAWN_DISTANCE)  # Random z offset in front of the rocket
+        #z = rocket_pos[2] - random.uniform(STAR_SPAWN_DISTANCE - 50, STAR_SPAWN_DISTANCE)  # In front of the rocket
+
+        stars_mode_1.append([x, y, z])  # Add the star to the list
+
+def generate_meteors():
+    """Generates meteors randomly ahead of the rocket."""
+    global meteors
+
+    while len(meteors) < MAX_METEORS:
+        x = rocket_pos[0] + random.uniform(-1000, 1000)  # Random x offset
+        y = rocket_pos[1] + random.uniform(-1000, 1000)  # Random y offset
+        z = rocket_pos[2] - random.uniform(200, METEOR_SPAWN_DISTANCE)  # Random z offset ahead of the rocket
+        meteors.append([x, y, z])
+
+def generate_closer_meteors():
+    """Generates meteors randomly ahead of the rocket."""
+    global meteors
+
+    while len(meteors) < 10:
+        x = rocket_pos[0] + random.uniform(-50, 50)  # Random x offset
+        y = rocket_pos[1] + random.uniform(-50, 50)  # Random y offset
+        z = rocket_pos[2] - random.uniform(200, METEOR_SPAWN_DISTANCE)  # Random z offset ahead of the rocket
+        meteors.append([x, y, z])
+
+def generate_repair_items():
+    """Generates repair items ahead of the rocket"""
+    global broken_parts, last_repair_spawn
+    
+    current_time = time.time()
+    if current_time - last_repair_spawn > REPAIR_SPAWN_INTERVAL:
+        last_repair_spawn = current_time
+        while len(broken_parts) < MAX_REPAIR_ITEMS:
+            x = rocket_pos[0] + random.uniform(-150, 150)
+            y = rocket_pos[1] + random.uniform(-150, 150)
+            z = rocket_pos[2] - random.uniform(200, 800)
+            broken_parts.append([x, y, z])
+
+def start_repair_minigame():
+    """Initialize repair game elements"""
+    global repair_mode, repair_timer, repair_progress
+    repair_mode = True
+    repair_timer = time.time()
+    repair_progress = 0
+    broken_parts.clear()  # Start with empty list
+
+# def start_repair_minigame():
+#     """Initialize repair game elements"""
+#     global repair_mode, broken_parts, repair_timer, repair_progress
+#     repair_mode = True
+#     repair_timer = time.time()
+#     repair_progress = 0
+    
+#     # Spawn repair items using meteor-style positioning
+#     broken_parts = []
+#     for _ in range(REPAIR_ITEMS_NEEDED):
+#         x = rocket_pos[0] + random.uniform(-50, 50)
+#         y = rocket_pos[1] + random.uniform(-50, 50)
+#         z = rocket_pos[2] - random.uniform(150, 300)  # Spawn in front of rocket
+#         broken_parts.append([x, y, z])
 
 def initialize_stars():
     """Populates the 'stars' list with random 3D coordinates."""
@@ -581,6 +707,274 @@ def draw_solar_system():
 
     glPopMatrix()  # Neptune
 
+
+# def draw_rocket():
+#     global rocket_pos
+
+#     glPushMatrix()
+#     glTranslatef(*rocket_pos)  # Move to the rocket's position
+#     glColor3f(0.0, 0.2, 0.9)  # Red color
+#     glutSolidSphere(5.0, 20, 20)  # Rocket body (sphere for simplicity)
+#     glTranslatef(0.0, 0.0, 10.0)  # Move down for the body
+#     glColor3f(0.0, 0.0, 0.3)
+#     glutSolidSphere(2.0, 20, 20)  # Rocket tip
+#     glPopMatrix()
+
+def draw_rocket():
+    global rocket_pos
+
+    glPushMatrix()
+    glTranslatef(*rocket_pos)  # Position in world space
+    
+    # Rotate entire rocket model to face along Z-axis
+    glRotatef(185, 1, 0, 0)  # Pivot model from Y-up to Z-forward
+    
+    # Main body (cylinder along Z-axis)
+    glPushMatrix()
+    glColor3f(0.7, 0.7, 0.7)
+    glutSolidCylinder(2.5, 30.0, 32, 32)  # Height along Z-axis
+    glPopMatrix()
+
+    # Nose cone (front of rocket)
+    glPushMatrix()
+    glTranslatef(0.0, 0.0, 30.0)  # Move to tip along Z-axis
+    glColor3f(1.0, 0.0, 0.0)
+    glutSolidCone(2.5, 8.0, 32, 32)
+    glPopMatrix()
+
+    # Engine nozzle (base of rocket)
+    glPushMatrix()
+    glTranslatef(0.0, 0.0, -2.0)  # Behind main body
+    glColor3f(0.3, 0.3, 0.3)
+    glutSolidCylinder(3.0, 2.0, 32, 32)
+    glPopMatrix()
+
+    # Fins (radial placement around Z-axis)
+    glColor3f(0.0, 0.5, 0.0)
+    for i in range(3):
+        glPushMatrix()
+        glRotatef(i * 120, 0, 0, 1)  # Rotate around Z-axis
+        glTranslatef(2.5, 0.0, 0.0)  # Offset from center
+        glBegin(GL_TRIANGLES)
+        glVertex3f(0, 0, 0)
+        glVertex3f(5, 0, 0)
+        glVertex3f(0, 0, 8)
+        glEnd()
+        glPopMatrix()
+
+    # Window (mid-body)
+    glPushMatrix()
+    glTranslatef(0.0, 0.0, 22.0)  # Position along Z-axis
+    glColor3f(0.0, 0.0, 1.0)
+    glutSolidSphere(1.5, 32, 32)
+    glPopMatrix()
+
+    # Decorative stripes
+    glColor3f(1.0, 0.5, 0.0)
+    for z in [5.0, 15.0, 25.0]:  # Positions along Z-axis
+        glPushMatrix()
+        glTranslatef(0.0, 0.0, z)
+        glutSolidTorus(0.2, 2.6, 16, 16)
+        glPopMatrix()
+
+    glPopMatrix()
+
+
+def draw_stars_mode_1():
+    """Draws stars for scene mode 1."""
+    global stars_mode_1
+
+    glPointSize(2)
+    glBegin(GL_POINTS)
+    glColor3f(1.0, 1.0, 1.0)  # White stars
+
+    for star in stars_mode_1:
+        glVertex3f(star[0], star[1], star[2])  # Draw each star
+
+    glEnd()
+
+def draw_meteors():
+    """Draws the meteors."""
+    global meteors
+
+    glColor3f(0.3, 0.1, 0.1)  # Red color for meteors
+    for meteor in meteors:
+        glPushMatrix()
+        glTranslatef(*meteor)
+        glutSolidSphere(METEOR_RADIUS, 20, 20)
+        glPopMatrix()
+
+def draw_mission_planet():
+    """Draws the mission planet."""
+    global mission_planet_pos
+
+    if mission_planet_pos:
+        glPushMatrix()
+        glTranslatef(*mission_planet_pos)  # Position the planet
+        glColor4f(0.8, 0.3, 0.1, 1.0)  # Blue color for the mission planet
+        glutSolidSphere(MISSION_PLANET_RADIUS, 32, 32)  # Render the planet
+        glPopMatrix()
+
+# def draw_repair_items():
+#     """Draw repair items using meteor visualization"""
+#     glColor3f(REPAIR_ITEM_COLOR[0], REPAIR_ITEM_COLOR[1], REPAIR_ITEM_COLOR[2])  # Color for repair items
+#     for part in broken_parts:
+#         glPushMatrix()
+#         glTranslatef(*part)
+#         glutSolidSphere(REPAIR_ITEM_RADIUS, 20, 20)
+#         glPopMatrix()
+
+def draw_repair_items():
+    """Draw complex animated repair items with multiple components"""
+    current_time = time.time()
+    
+    for part in broken_parts:
+        glPushMatrix()
+        glTranslatef(*part)
+        
+        # Base pulsating sphere
+        pulse = math.sin(current_time * 8) * 0.2 + 1.0
+        glPushMatrix()
+        glScalef(pulse, pulse, pulse)
+        glColor3f(0.0, 1.0, 0.2)  # Bright green core
+        glutSolidSphere(REPAIR_ITEM_RADIUS * 0.8, 32, 32)
+        glPopMatrix()
+        
+        # Rotating inner cube
+        glPushMatrix()
+        glRotatef(current_time * 180, 1, 1, 0)  # Rotate on two axes
+        glColor3f(0.8, 1.0, 0.8)  # Light green
+        glutWireCube(REPAIR_ITEM_RADIUS * 1.2)
+        glPopMatrix()
+        
+        # Outer wireframe sphere with phase-shifted pulse
+        glPushMatrix()
+        glScalef(1.2 + math.sin(current_time * 6) * 0.1, 
+                1.2 + math.cos(current_time * 6) * 0.1, 
+                1.2 + math.sin(current_time * 6) * 0.1)
+        glColor3f(1.0, 0.6, 0.0)  # Orange glow
+        glutWireSphere(REPAIR_ITEM_RADIUS * 1.3, 16, 16)
+        glPopMatrix()
+        
+        # Floating particles around the item
+        glPointSize(3)
+        glBegin(GL_POINTS)
+        glColor3f(0.4, 1.0, 0.4)  # Bright green particles
+        for i in range(20):
+            angle = math.radians(i * 18 + current_time * 180)
+            radius = REPAIR_ITEM_RADIUS * 1.5
+            x = radius * math.cos(angle) * math.sin(current_time * 4)
+            y = radius * math.sin(angle) * math.sin(current_time * 4)
+            z = radius * math.cos(current_time * 4)
+            glVertex3f(x, y, z)
+        glEnd()
+        
+        glPopMatrix()
+
+def draw_repair_hud():
+    """Show repair progress and timer"""
+    # Timer bar
+    elapsed = time.time() - repair_timer
+    time_left = REPAIR_TIME - elapsed
+    progress_width = (time_left/REPAIR_TIME) * 200
+    
+    glColor3f(*REPAIR_HUD_COLOR)
+    glBegin(GL_QUADS)
+    glVertex2f(50, WINDOW_HEIGHT-50)
+    glVertex2f(50 + progress_width, WINDOW_HEIGHT-50)
+    glVertex2f(50 + progress_width, WINDOW_HEIGHT-30)
+    glVertex2f(50, WINDOW_HEIGHT-30)
+    glEnd()
+    
+    # Progress text
+    draw_text(50, WINDOW_HEIGHT-80, 
+             f"Repairs: {repair_progress}/{REPAIR_ITEMS_NEEDED}")
+
+def draw_game_over():
+    """Displays the game over message."""
+    draw_text(WINDOW_WIDTH // 2 - 100, WINDOW_HEIGHT // 2, "GAME OVER", font=GLUT_BITMAP_HELVETICA_18)
+    draw_text(WINDOW_WIDTH // 2 - 150, WINDOW_HEIGHT // 2 - 30, "Press ESC to Exit", font=GLUT_BITMAP_HELVETICA_18)
+
+
+def check_repair_collision():
+    """Meteor-style collision detection"""
+    global repair_progress, broken_parts
+    for part in broken_parts[:]:
+        dx = rocket_pos[0] - part[0]
+        dy = rocket_pos[1] - part[1]
+        dz = rocket_pos[2] - part[2]
+        distance = math.sqrt(dx*dx + dy*dy + dz*dz)
+        
+        if distance < REPAIR_ITEM_RADIUS + 15:  # Similar collision range to meteors
+            repair_progress += 1
+            broken_parts.remove(part)
+  
+
+def update_stars_mode_1():
+    """Updates the stars for scene mode 1."""
+    global stars_mode_1
+
+    # Remove stars that are behind the rocket
+    stars_mode_1 = [star for star in stars_mode_1 if star[2] < rocket_pos[2] - STAR_DESPAWN_DISTANCE]
+
+    # Generate new stars to maintain the count
+    generate_stars_mode_1()
+
+def update_meteors():
+    """Updates the meteors and removes those behind the rocket."""
+    global meteors
+
+    # Remove meteors that are behind the rocket
+    meteors = [meteor for meteor in meteors if meteor[2] < rocket_pos[2] - STAR_DESPAWN_DISTANCE]
+
+    # Generate new meteors to maintain the count
+    generate_meteors()
+    generate_closer_meteors()
+
+def update_repair_items():
+    """Updates repair items and removes old ones"""
+    global broken_parts
+    
+    # Remove items behind the rocket
+    broken_parts = [part for part in broken_parts if part[2] < rocket_pos[2] - STAR_DESPAWN_DISTANCE]
+    
+    # Generate new items
+    generate_repair_items()
+
+def check_collisions():
+    """Checks for collisions between the rocket and meteors."""
+    global rocket_health, game_over, repair_mode
+
+    for meteor in meteors:
+        distance = math.sqrt(
+            (rocket_pos[0] - meteor[0])**2 +
+            (rocket_pos[1] - meteor[1])**2 +
+            (rocket_pos[2] - meteor[2])**2
+        )
+        if distance < METEOR_RADIUS:  # Collision threshold (rocket radius + meteor radius)
+            rocket_health -= 1
+            meteors.remove(meteor)  # Remove the meteor after collision
+            if rocket_health <= -1:
+                game_over = True
+                break
+    if rocket_health <= 3 and not repair_mode and not game_over:
+        start_repair_minigame()
+
+def check_mission_completion():
+    """Checks if the rocket has reached the mission planet."""
+    global mission_complete
+
+    if mission_planet_pos:
+        distance = math.sqrt(
+            (rocket_pos[0] - mission_planet_pos[0])**2 +
+            (rocket_pos[1] - mission_planet_pos[1])**2 +
+            (rocket_pos[2] - mission_planet_pos[2])**2
+        )
+        if distance < MISSION_PLANET_RADIUS:  # Rocket has reached the planet
+            mission_complete = True
+            print("Mission Complete!")  # Debug message
+            glutPostRedisplay()
+
 # --- Setup Functions ---
 
 def setup_lighting():
@@ -606,61 +1000,117 @@ def setup_lighting():
     # Use smooth shading for nicer visuals - glShadeModel affects rendering regardless of lighting
     glShadeModel(GL_SMOOTH)
 
+# def setupCamera():
+#     """Sets up the projection and modelview matrices for the camera."""
+#     # Projection Matrix
+#     glMatrixMode(GL_PROJECTION)
+#     glLoadIdentity()
+#     gluPerspective(FOV_Y, float(WINDOW_WIDTH) / float(WINDOW_HEIGHT), NEAR_CLIP, FAR_CLIP)
+
+#     # ModelView Matrix
+#     glMatrixMode(GL_MODELVIEW)
+#     glLoadIdentity()
+#     cx, cy, cz = camera_pos
+#     tx, ty, tz = camera_target
+#     ux, uy, uz = camera_up
+#     gluLookAt(cx, cy, cz, tx, ty, tz, ux, uy, uz)
 def setupCamera():
     """Sets up the projection and modelview matrices for the camera."""
-    # Projection Matrix
+    global camera_pos, camera_target
+    global camera_pos_mode_1, camera_target_mode_1
+
+    # Select the appropriate camera position and target based on the scene mode
+    if scene_mode == 0:
+        cx, cy, cz = camera_pos
+        tx, ty, tz = camera_target
+    elif scene_mode == 1:
+        cx, cy, cz = camera_pos_mode_1
+        tx, ty, tz = camera_target_mode_1
+
+    # Set up the camera
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
     gluPerspective(FOV_Y, float(WINDOW_WIDTH) / float(WINDOW_HEIGHT), NEAR_CLIP, FAR_CLIP)
 
-    # ModelView Matrix
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
-    cx, cy, cz = camera_pos
-    tx, ty, tz = camera_target
     ux, uy, uz = camera_up
     gluLookAt(cx, cy, cz, tx, ty, tz, ux, uy, uz)
 
 # --- GLUT Callback Functions ---
 
+def keyboardUpListener(key, x, y):
+    global rocket_movement
+    
+    if scene_mode == 1:  # Rocket controls only in scene mode 1
+      if key == b'w':  # Stop moving forward
+          rocket_movement["q"] = False
+      elif key == b's':  # Stop moving backward
+          rocket_movement["e"] = False
+      elif key == b'a':  # Stop moving left
+          rocket_movement["a"] = False
+      elif key == b'd':  # Stop moving right
+          rocket_movement["d"] = False
+    #   elif key == b'q':  # Stop moving up
+    #       rocket_movement["w"] = False
+
 def keyboardListener(key, x, y):
     """Handles standard keyboard input."""
-    global camera_pos, GRAVITY_FACTOR, EARTH_ROTATION_SPEED  # Add EARTH_ROTATION_SPEED here
+    global camera_pos, GRAVITY_FACTOR, EARTH_ROTATION_SPEED,scene_mode,rocket_movement  # Add EARTH_ROTATION_SPEED here
 
     x_cam, y_cam, z_cam = camera_pos
 
     # Basic WASD for translation on X/Z plane, Q/E for up/down
-    if key == b'w':
-        z_cam -= CAMERA_MOVE_SPEED # Move forward
-    elif key == b's':
-        z_cam += CAMERA_MOVE_SPEED # Move backward
-    elif key == b'a':
-        x_cam -= CAMERA_MOVE_SPEED # Strafe left
-    elif key == b'd':
-        x_cam += CAMERA_MOVE_SPEED # Strafe right
-    elif key == b'q': # Use Q for up
-        y_cam += CAMERA_MOVE_SPEED # Move up
-    elif key == b'e': # Use E for down
-        y_cam -= CAMERA_MOVE_SPEED # Move down
-    elif key == b'z': # Zoom in (move closer along view axis - simplified here)
-         # A proper zoom would move towards the look-at point
-         z_cam -= CAMERA_ZOOM_SPEED
-    elif key == b'x': # Zoom out
-        z_cam += CAMERA_ZOOM_SPEED
-    elif key == b'\x1b': # Escape key
-        glutLeaveMainLoop() # Exit the application
+    if scene_mode == 1:  # Rocket controls only in scene mode 1
+        if key == b'w':  # Move forward
+            rocket_movement["q"] = True
+        elif key == b's':  # Move backward
+            rocket_movement["e"] = True
+        elif key == b'a':  # Move left
+            rocket_movement["a"] = True
+        elif key == b'd':  # Move right
+            rocket_movement["d"] = True
+        # elif key == b'q':  # Move up
+        #     if rocket_movement["w"] == False:  # Only allow up movement if not moving forward
+        #         rocket_movement["w"] = True
+        #     elif rocket_movement["w"] == True:
+        #         rocket_movement["w"] = False
 
-    # Add these at the end of the function (before the redraw call):
-    elif key == b'g':  # Increase gravity (faster orbits)
-        GRAVITY_FACTOR = min(2.0, GRAVITY_FACTOR + GRAVITY_STEP)
-    elif key == b'h':  # Decrease gravity (slower orbits)
-        GRAVITY_FACTOR = max(0.1, GRAVITY_FACTOR - GRAVITY_STEP)
+    elif scene_mode == 0:
+        if key == b'w':
+            z_cam -= CAMERA_MOVE_SPEED # Move forward
+        elif key == b's':
+            z_cam += CAMERA_MOVE_SPEED # Move backward
+        elif key == b'a':
+            x_cam -= CAMERA_MOVE_SPEED # Strafe left
+        elif key == b'd':
+            x_cam += CAMERA_MOVE_SPEED # Strafe right
+        elif key == b'q': # Use Q for up
+            y_cam += CAMERA_MOVE_SPEED # Move up
+        elif key == b'e': # Use E for down
+            y_cam -= CAMERA_MOVE_SPEED # Move down
+        elif key == b'z': # Zoom in (move closer along view axis - simplified here)
+            # A proper zoom would move towards the look-at point
+            z_cam -= CAMERA_ZOOM_SPEED
+        elif key == b'x': # Zoom out
+            z_cam += CAMERA_ZOOM_SPEED
+
+        # Add these at the end of the function (before the redraw call):
+        elif key == b'g':  # Increase gravity (faster orbits)
+            GRAVITY_FACTOR = min(2.0, GRAVITY_FACTOR + GRAVITY_STEP)
+        elif key == b'h':  # Decrease gravity (slower orbits)
+            GRAVITY_FACTOR = max(0.1, GRAVITY_FACTOR - GRAVITY_STEP)
 
 
-    elif key == b',':  # Slow down rotation
-        EARTH_ROTATION_SPEED = max(0.1, EARTH_ROTATION_SPEED - 0.1)
-    elif key == b'.':  # Speed up rotation
-        EARTH_ROTATION_SPEED = min(5.0, EARTH_ROTATION_SPEED + 0.1)
+        elif key == b',':  # Slow down rotation
+            EARTH_ROTATION_SPEED = max(0.1, EARTH_ROTATION_SPEED - 0.1)
+        elif key == b'.':  # Speed up rotation
+            EARTH_ROTATION_SPEED = min(5.0, EARTH_ROTATION_SPEED + 0.1)
+
+    if key == b'\x1b':  # Escape key
+        glutLeaveMainLoop()
+    elif key == b'p':  # Toggle scene mode
+        scene_mode = 1 if scene_mode == 0 else 0  # Toggle between 0 and 1
 
     camera_pos = [x_cam, y_cam, z_cam]
     glutPostRedisplay() # Request redraw after camera move
@@ -694,35 +1144,100 @@ def idle():
     global moon_orbit_angle, phobos_orbit_angle, deimos_orbit_angle
     global io_orbit_angle, europa_orbit_angle, ganymede_orbit_angle, callisto_orbit_angle
     global titan_orbit_angle, titania_orbit_angle, triton_orbit_angle
+    global scene_mode,rocket_pos,rocket_movement,rocket_velocity, camera_pos_mode_1, camera_target_mode_1, movement  # Add this to control scene mode
+    global game_over, mission_complete, mission_start_time, mission_planet_pos, repair_mode, rocket_health
+    # Only update orbits if scene_mode is 0 (full solar system)
+    if scene_mode == 0:
+        # Update planet orbital angles
+        earth_rotation_angle = (earth_rotation_angle + EARTH_ROTATION_SPEED * GRAVITY_FACTOR) % 360.0
+        mercury_orbit_angle = (mercury_orbit_angle + MERCURY_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        venus_orbit_angle = (venus_orbit_angle + VENUS_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        earth_orbit_angle = (earth_orbit_angle + EARTH_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        mars_orbit_angle = (mars_orbit_angle + MARS_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        jupiter_orbit_angle = (jupiter_orbit_angle + JUPITER_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        saturn_orbit_angle = (saturn_orbit_angle + SATURN_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        uranus_orbit_angle = (uranus_orbit_angle + URANUS_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        neptune_orbit_angle = (neptune_orbit_angle + NEPTUNE_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
 
-    # Update planet orbital angles
-    earth_rotation_angle = (earth_rotation_angle + EARTH_ROTATION_SPEED * GRAVITY_FACTOR) % 360.0
-    mercury_orbit_angle = (mercury_orbit_angle + MERCURY_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    venus_orbit_angle = (venus_orbit_angle + VENUS_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    earth_orbit_angle = (earth_orbit_angle + EARTH_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    mars_orbit_angle = (mars_orbit_angle + MARS_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    jupiter_orbit_angle = (jupiter_orbit_angle + JUPITER_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    saturn_orbit_angle = (saturn_orbit_angle + SATURN_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    uranus_orbit_angle = (uranus_orbit_angle + URANUS_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    neptune_orbit_angle = (neptune_orbit_angle + NEPTUNE_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        # Update moon orbits
+        moon_orbit_angle = (moon_orbit_angle + MOON_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        phobos_orbit_angle = (phobos_orbit_angle + PHOBOS_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        deimos_orbit_angle = (deimos_orbit_angle + DEIMOS_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        io_orbit_angle = (io_orbit_angle + IO_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        europa_orbit_angle = (europa_orbit_angle + EUROPA_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        ganymede_orbit_angle = (ganymede_orbit_angle + GANYMEDE_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        callisto_orbit_angle = (callisto_orbit_angle + CALLISTO_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        titan_orbit_angle = (titan_orbit_angle + TITAN_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        titania_orbit_angle = (titania_orbit_angle + TITANIA_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        triton_orbit_angle = (triton_orbit_angle + TRITON_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
 
-    # Update moon orbits (also affected by gravity)
-    moon_orbit_angle = (moon_orbit_angle + MOON_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    phobos_orbit_angle = (phobos_orbit_angle + PHOBOS_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    deimos_orbit_angle = (deimos_orbit_angle + DEIMOS_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    io_orbit_angle = (io_orbit_angle + IO_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    europa_orbit_angle = (europa_orbit_angle + EUROPA_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    ganymede_orbit_angle = (ganymede_orbit_angle + GANYMEDE_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    callisto_orbit_angle = (callisto_orbit_angle + CALLISTO_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    titan_orbit_angle = (titan_orbit_angle + TITAN_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    titania_orbit_angle = (titania_orbit_angle + TITANIA_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
-    triton_orbit_angle = (triton_orbit_angle + TRITON_ORBIT_SPEED * GRAVITY_FACTOR) % (2 * math.pi)
+        # Update asteroid positions
+        for asteroid in asteroids:
+            asteroid["angle"] = (asteroid["angle"] + ASTEROID_ORBIT_SPEED * (ASTEROID_BELT_INNER_RADIUS / asteroid["distance"]) * GRAVITY_FACTOR) % (2 * math.pi)
+            asteroid["x"] = asteroid["distance"] * math.cos(asteroid["angle"])
+            asteroid["z"] = asteroid["distance"] * math.sin(asteroid["angle"])
+    
+    elif scene_mode == 1 and not game_over and not mission_complete:  # Rocket controls only in scene mode 1
+        if rocket_movement["w"]:
+            rocket_pos[2] -= rocket_speed  # Move forward
+        if rocket_movement["s"]:
+            rocket_pos[2] += rocket_speed  # Move backward
+        if rocket_movement["a"]:
+            rocket_pos[0] -= movement  # Move left
+        if rocket_movement["d"]:
+            rocket_pos[0] += movement  # Move right
+        if rocket_movement["q"]:
+            rocket_pos[1] += movement  # Move up
+        if rocket_movement["e"]:
+            rocket_pos[1] -= movement  # Move down
+        if mission_start_time is None:
+            mission_start_time = time.time() # Record the start time
+        
+        if not mission_complete:
+            elapsed_time = time.time() - mission_start_time
+            if elapsed_time >= 120 and mission_planet_pos is None:  # 2 minutes have passed
+                mission_planet_pos = [
+                    rocket_pos[0],  # Same x-coordinate as the rocket
+                    rocket_pos[1],  # Same y-coordinate as the rocket
+                    rocket_pos[2] - MISSION_PLANET_DISTANCE  # Far ahead of the rocket
+                ]
 
-    # Update asteroid positions
-    for asteroid in asteroids:
-        asteroid["angle"] = (asteroid["angle"] + ASTEROID_ORBIT_SPEED * (ASTEROID_BELT_INNER_RADIUS / asteroid["distance"]) * GRAVITY_FACTOR) % (2 * math.pi)
-        asteroid["x"] = asteroid["distance"] * math.cos(asteroid["angle"])
-        asteroid["z"] = asteroid["distance"] * math.sin(asteroid["angle"])
+    
+        check_mission_completion()
+        
+        # Update camera to follow the rocket
+        camera_target_mode_1 = rocket_pos[:]  # Camera looks at the rocket
+        camera_pos_mode_1 = [rocket_pos[0], rocket_pos[1] + 05.0 , rocket_pos[2] + 50.0]  # Position camera above and behind the rocket
+
+        update_stars_mode_1()
+        update_meteors()
+        check_collisions()
+    
+    if scene_mode == 1:
+        if mission_complete or game_over:
+            return
+    if repair_mode:
+        # Check timer
+        update_repair_items()
+        
+        # Check timer
+        if time.time() - repair_timer > REPAIR_TIME:
+            repair_mode = False
+            rocket_health = 0
+            game_over = True
+        
+        # Check completion
+        if repair_progress >= REPAIR_ITEMS_NEEDED:
+            repair_mode = False
+            rocket_health += 2
+            if rocket_health > 10: 
+                rocket_health = 10
+        
+        check_repair_collision()
+        glutPostRedisplay()
+
+
+
 
     glutPostRedisplay()
 
@@ -780,10 +1295,25 @@ def display():
     setup_lighting() # Note: Lighting is not active without glEnable(GL_LIGHTING)
 
     # Draw scene components
-    draw_starfield()
-    draw_orbit_lines()
-    draw_asteroid_belt()
-    draw_solar_system()
+    if scene_mode == 0:
+        # Full solar system
+        draw_starfield()
+        draw_orbit_lines()
+        draw_asteroid_belt()
+        draw_solar_system()
+    elif scene_mode == 1:
+        draw_stars_mode_1()
+        draw_rocket()
+        draw_meteors()
+        draw_mission_planet()
+        # Draw health points
+        draw_text(10, WINDOW_HEIGHT - 40, f"Number of hits it can take: {rocket_health}", font=GLUT_BITMAP_HELVETICA_18)
+        if game_over:
+            draw_game_over()
+            return
+        if repair_mode:
+            draw_repair_items()
+            draw_repair_hud()
 
     # Get current viewport dimensions for text positioning
     viewport = glGetIntegerv(GL_VIEWPORT)
@@ -802,8 +1332,22 @@ def display():
     # draw_text(10, WINDOW_HEIGHT-20, "Solar System Simulation") # Replaced by the line below
 
     # Update the text display to include gravity controls
-    draw_text(10, win_height - 20, "Solar System Simulation - Gravity: {:.1f}x".format(GRAVITY_FACTOR))
-    draw_text(10, 10, "WASDQE: Move | Z/X: Zoom | G/H: Change Gravity | ESC: Exit")
+    if scene_mode == 0:
+        draw_text(10, win_height - 20, "Solar System Simulation - Gravity: {:.1f}x".format(GRAVITY_FACTOR))
+        draw_text(10, 10, "WASDQE: Move | Z/X: Zoom | G/H: Change Gravity | ESC: Exit")
+    if scene_mode == 1:
+      if mission_complete:
+        draw_text(WINDOW_WIDTH // 2 - 100, WINDOW_HEIGHT // 2, "MISSION COMPLETE!", font=GLUT_BITMAP_HELVETICA_18)
+        draw_text(WINDOW_WIDTH // 2 - 150, WINDOW_HEIGHT // 2 - 30, "Press ESC to Exit", font=GLUT_BITMAP_HELVETICA_18)
+        
+        # --- Add these lines to restore matrices BEFORE returning ---
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+        glPopMatrix()
+        
+        glutSwapBuffers()
+        return  # Exit after restoring matrices
 
     # Restore previous states
     # glEnable(GL_DEPTH_TEST) # REMOVED (restoring feature that was removed)
@@ -829,6 +1373,7 @@ def main():
     # Register callback functions
     glutDisplayFunc(display)
     glutKeyboardFunc(keyboardListener)
+    glutKeyboardUpFunc(keyboardUpListener)
     glutSpecialFunc(specialKeyListener)
     glutMouseFunc(mouseListener)
     glutIdleFunc(idle)
